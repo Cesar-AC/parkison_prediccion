@@ -52,7 +52,7 @@ Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en len
 
 ## Estructura del proyecto
 
-```text
+```BASH 
 📦 Parkinson‑Detector
 ├─ app.py                # interfaz Streamlit
 ├─ funcion.py            # extracción de features + predicción
@@ -67,4 +67,71 @@ Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en len
 ├─ tests/
 ├─ docs/                 # capturas y GIFs
 └─ README.md
+
+```
+---
+
+## Instalación
+
+### Requisitos
+
+| Software | Versión |
+|----------|---------|
+| **Python** | ≥ 3.10 |
+| **Praat**  | 6.3 o superior (se instala automáticamente vía Parselmouth) |
+| **FFmpeg** | Opcional, para operaciones avanzadas con WAV |
+
+### 1 · Entorno virtual
+
+```bash
+git clone https://github.com/tu‑usuario/Parkinson‑Detector.git
+cd Parkinson‑Detector
+python -m venv .venv
+source .venv/bin/activate      # En Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+El archivo requirements.txt instala streamlit, parselmouth, librosa, scikit‑learn, soundfile, fpdf, nolds, etc.
+
+### 2 · Ejecución local
+```bash
+streamlit run app.py
+```
+La aplicación quedará disponible en http://localhost:8501; graba tu voz y visualiza el resultado en tiempo real.
+
+## Dataset
+Oxford Parkinson’s Disease Detection Dataset
+https://archive.ics.uci.edu/ml/datasets/Parkinsons
+
+Este conjunto de 195 grabaciones (23 pacientes, 8 controles) se emplea para entrenar el modelo K‑Nearest Neighbors incluido en models/modelo_knn.pkl.
+
+## Licencia
+Este proyecto se distribuye bajo licencia MIT.
+Consulta el archivo LICENSE para más detalles.
+Badges generados con Shields.io.
+
+## Fuentes consultadas
+
+Parselmouth – “Praat in Python, the Pythonic way”
+https://github.com/YannickJadoul/Parselmouth
+
+Streamlit Community Cloud Docs
+https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app
+
+UCI Machine Learning Repository – Parkinson’s Dataset
+https://archive.ics.uci.edu/ml/datasets/Parkinsons
+
+streamlit‑mic‑recorder – PyPI
+https://pypi.org/project/streamlit-mic-recorder/
+
+Gemini API – Text Generation Docs
+https://ai.google.dev/gemini-api/docs/text-generation
+
+Shields.io – License Badges
+https://gist.github.com/lukas-h/2a5d00690736b4c3a7ba
+
+
+---
+
+
+
 
