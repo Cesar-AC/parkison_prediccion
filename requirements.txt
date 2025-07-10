@@ -1,0 +1,17 @@
+# requirements.txt
+streamlit
+streamlit-webrtc
+soundfile
+numpy
+pandas
+joblib
+praat-parselmouth
+librosa
+nolds
+streamlit-mic-recorder
+tabulate
+opensmile
+scipy
+fpdf2 
+requests
+ngrok
