@@ -1,0 +1,12 @@
+# Python byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Logs y datos binarios
+streamlit_logs.txt
+*.wav

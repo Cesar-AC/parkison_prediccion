@@ -110,7 +110,7 @@ if paciente:
 
 # Validación de paciente
 if not paciente:
-    st.warning("Por favor, ingresa tu paciente y apellido antes de continuar.")
+    st.warning("Por favor, ingresa tu nombre y apellido antes de continuar.")
     st.stop()
 
 # ── 1 · Grabar audio ────────────────────────────────────────────
