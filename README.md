@@ -111,7 +111,7 @@ La aplicación quedará disponible en http://localhost:8501; graba tu voz y visu
 Oxford Parkinson’s Disease Detection Dataset
 https://archive.ics.uci.edu/ml/datasets/Parkinsons
 
-Este conjunto de 195 grabaciones (23 pacientes, 8 controles) se emplea para entrenar el modelo K‑Nearest Neighbors incluido en models/modelo_knn.pkl.
+Este conjunto de 195 grabaciones (23 pacientes, 8 controles) se emplea para entrenar el modelo **Support Vector Machine (SVM)** incluido en `models/svm_mcc_final.joblib`.
 
 ## Licencia
 Este proyecto se distribuye bajo licencia MIT.
