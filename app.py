@@ -6,35 +6,22 @@ import wave
 from streamlit_mic_recorder import mic_recorder
 from fpdf import FPDF
 from datetime import datetime
+from googletrans import Translator
+translator = Translator()
+import logging
 
 # backend
 from funcion import predict_parkinson, MODEL_FEATURES, RANGE
 
 FEATURE_DESCRIPTIONS = {
-    "MDVP:Fo(Hz)"   : "Mide la frecuencia fundamental de tu voz, relacionada con cuán aguda o grave suena.",
-    "MDVP:Fhi(Hz)"  : "Refleja el tono más alto que alcanza tu voz en la grabación.",
-    "MDVP:Flo(Hz)"  : "Refleja el tono más bajo que alcanza tu voz en la grabación.",
-    "MDVP:Jitter(%)": "Mide la estabilidad de la frecuencia; cambios bruscos pueden indicar irregularidad al hablar.",
-    "MDVP:Jitter(Abs)": "Evalúa cambios mínimos entre ciclos de voz; muestra precisión en el control vocal.",
-    "MDVP:RAP"      : "Indica pequeñas variaciones en el tono entre tres ciclos seguidos de voz.",
-    "MDVP:PPQ"      : "Similar a RAP, pero promedia cambios en cinco ciclos seguidos de voz.",
-    "Jitter:DDP"    : "Valora fluctuaciones rápidas del tono en períodos muy cortos.",
-    "MDVP:Shimmer"  : "Mide la variación en la intensidad (volumen) de la voz de un ciclo a otro.",
-    "MDVP:Shimmer(dB)": "Es la variabilidad del volumen expresada en decibelios.",
-    "Shimmer:APQ3"  : "Promedia los cambios de intensidad de la voz en tres ciclos seguidos.",
-    "Shimmer:APQ5"  : "Promedia los cambios de intensidad de la voz en cinco ciclos seguidos.",
-    "Shimmer:DDA"   : "Indica variabilidad extrema de la intensidad entre ciclos cercanos.",
-    "NHR"           : "Compara la cantidad de ruido frente a la parte armónica de tu voz.",
-    "HNR"           : "Compara la claridad de tu voz frente al ruido de fondo; valores altos indican voz clara.",
-    "RPDE"          : "Evalúa la complejidad y la regularidad del patrón vocal.",
-    "DFA"           : "Analiza la presencia de patrones repetitivos o fluctuaciones en la voz.",
-    "spread1"       : "Estudia cómo se dispersa la frecuencia de tu voz en el tiempo.",
-    "spread2"       : "Analiza cambios bruscos o curvaturas en la trayectoria vocal.",
-    "PPE"           : "Evalúa la variabilidad en el ciclo de los tonos; refleja lo predecible o variable que es tu voz."
+    "spread1": "Dispersión de la frecuencia fundamental (cuanto más alto → más variación).",
+    "MDVP:APQ": "Amplitud media de perturbación (fluctuaciones de volumen).",
+    "MDVP:Shimmer": "Variabilidad ciclo a ciclo en la intensidad de la voz."
 }
 
-#GEMINI_KEY = "AIzaSyAoReEdMLGBFiNG3oS089XrPc2OiW43-Fc"
-GEMINI_KEY = "AIzaSyBRup_GtM7g0Z-_VexcN8zvN-b12fER-0k"
+GEMINI_KEY = "AIzaSyAoReEdMLGBFiNG3oS089XrPc2OiW43-Fc"
+#GEMINI_KEY = "AIzaSyBRup_GtM7g0Z-_VexcN8zvN-b12fER-0k"
+
 st.set_page_config(page_title="🎤 Parkinson Detector", layout="wide")
 st.markdown("""
 <style>
@@ -93,8 +80,34 @@ st.markdown('<div class="progress-step">' + "".join(
     for i,(cls,name) in enumerate(zip(step_status, steps))
 ) + '</div>', unsafe_allow_html=True)
 
+# Justo después de pedir el nombre del paciente
+display_name, idioma = st.selectbox(
+    "🌐 Selecciona tu idioma de preferencia:",
+    options=[
+        ("Español", "es"),
+        ("Inglés", "en"),
+        ("Portugués", "pt"),
+        ("Francés", "fr"),
+        ("Chino mandarín", "zh-cn"),
+    ],
+    index=0,
+)
+st.session_state["idioma"] = idioma  # ahora idioma es un string: "es", "en", etc.
+
+
+def traducir(texto: str, dest: str) -> str:
+    if dest == "es":
+        return texto  # no traduce si el destino es español
+    try:
+        return translator.translate(texto, dest=dest).text
+    except Exception:
+        # registra el error en consola/archivo, pero no en la UI
+        logging.exception("Error traduciendo texto")
+        return texto
+
+
 # ── 0 · Bienvenida y datos del paciente ─────────────────────────────
-st.markdown("""
+texto_bienvenida = """
 # 👋 ¡Bienvenido(a) a Parkinson Detector!
 
 Antes de comenzar:
@@ -102,25 +115,40 @@ Antes de comenzar:
 - Procura estar en un lugar **tranquilo**, sin mucho ruido de fondo.
 - Cuando grabes tu voz, mantén una distancia adecuada del micrófono.
 - Graba por **más de 5 segundos** diciendo una vocal clara (por ejemplo: “A” o “E”).
-""")
+"""
+# traducimos todo el bloque de una vez
+st.markdown(traducir(texto_bienvenida, st.session_state["idioma"]), unsafe_allow_html=True)
 
-paciente = st.text_input("👤 nombre y Apellido", value=st.session_state.get("paciente", ""))
+# Input del paciente
+label_paciente = traducir("👤 Nombre y Apellido", st.session_state["idioma"])
+paciente = st.text_input(label_paciente, value=st.session_state.get("paciente", ""))
 if paciente:
     st.session_state["paciente"] = paciente
 
 # Validación de paciente
+warning_msg = traducir("Por favor, ingresa tu nombre y apellido antes de continuar.", st.session_state["idioma"])
 if not paciente:
-    st.warning("Por favor, ingresa tu nombre y apellido antes de continuar.")
+    st.warning(warning_msg)
     st.stop()
+
 
 # ── 1 · Grabar audio ────────────────────────────────────────────
 audio_state = st.session_state.get("audio")
 audio_ok = False
+
 if not audio_state:
-    rec = mic_recorder("▶️ Iniciar", "⏹️ Detener", just_once=True, format="wav")
+    # etiquetas del recorder traducidas
+    start_label = traducir("▶️ Iniciar", idioma)
+    stop_label  = traducir("⏹️ Detener", idioma)
+
+    rec = mic_recorder(start_label, stop_label, just_once=True, format="wav")
     if not rec or not rec.get("bytes"):
-        st.info("Pulsa ▶️ para grabar tu voz. Recuerda repetir una vocal, como 'A' o 'E'.")
+        st.info(traducir(
+            "Pulsa ▶️ para grabar tu voz. Recuerda repetir una vocal, como 'A' o 'E'.",
+            idioma
+        ))
         st.stop()
+
     # Chequea duración mínima (5 segundos)
     try:
         audio_bytes = rec["bytes"]
@@ -128,15 +156,22 @@ if not audio_state:
             with wave.open(wav_buffer, "rb") as w:
                 dur = w.getnframes() / w.getframerate()
         if dur < 4.5:
-            st.error(f"El audio es muy corto ({dur:.1f} s). Por favor, graba al menos 5 segundos.")
+            st.error(traducir(
+                f"El audio es muy corto ({dur:.1f} s). Por favor, graba al menos 5 segundos.",
+                idioma
+            ))
             st.stop()
         else:
             audio_ok = True
     except Exception:
-        st.error("No se pudo analizar la duración del audio. Intenta grabar de nuevo.")
+        st.error(traducir(
+            "No se pudo analizar la duración del audio. Intenta grabar de nuevo.",
+            idioma
+        ))
         st.stop()
+
     st.session_state.audio = audio_bytes
-    st.success("✅ ¡Audio guardado correctamente!")
+    st.success(traducir("✅ ¡Audio guardado correctamente!", idioma))
 else:
     audio_ok = True
 
@@ -149,69 +184,98 @@ if audio_ok:
 # ── 3 · ANALIZAR & REINTENTAR ─────────────────────────────────
 c1, c2 = st.columns(2)
 with c1:
-    if st.button("🔍 Analizar", key="analyze") and audio_ok:
+    analyze_label = traducir("🔍 Analizar", idioma)
+    if st.button(analyze_label, key="analyze") and audio_ok:
         st.session_state.analyzed = True
 
 # ── 4 · Tras Analizar ──────────────────────────────────────────
 if st.session_state.get("analyzed"):
-    with st.spinner("Extrayendo variables…"):
+    spinner_msg = traducir("Extrayendo variables…", idioma)
+    with st.spinner(spinner_msg):
         raw, clip, scl, y, proba = predict_parkinson("recording.wav")
 
     # 4.1 Tabla Variables con tooltip
+    title_vars = traducir("📊 Variables (Bruto vs Clip)", idioma)
+    tiptext   = traducir(
+        "Se comparan los valores extraídos de tu voz (“Bruto”) "
+        "con los valores ajustados al rango de entrenamiento (“Clip”).",
+        idioma
+    )
     st.markdown(
-        '<h3 style="display:inline;">📊 Variables (Bruto vs Clip)</h3> '
-        '<span class="tooltip">❔'
-        '<span class="tiptext">Se comparan los valores extraídos de tu voz (“Bruto”) '
-        'con los valores ajustados al rango de entrenamiento (“Clip”).</span>'
-        '</span>', 
+        f'<h3 style="display:inline;">{title_vars}</h3> '
+        f'<span class="tooltip">❔'
+        f'<span class="tiptext">{tiptext}</span>'
+        f'</span>',
         unsafe_allow_html=True
     )
 
+    # Construye las cabeceras traducidas de la tabla
+    cols = [
+        traducir("Variable", idioma),
+        traducir("Bruto", idioma),
+        traducir("Clip", idioma),
+        traducir("Min", idioma),
+        traducir("Max", idioma),
+    ]
     rows = [(f, raw[f], clip[f], *RANGE[f]) for f in MODEL_FEATURES]
-    df_vars = pd.DataFrame(rows, columns=["Variable","Bruto","Clip","Min","Max"])
+    df_vars = pd.DataFrame(rows, columns=cols)
     st.dataframe(df_vars, hide_index=True, use_container_width=True)
-
-    rows = [(f, raw[f], clip[f], *RANGE[f]) for f in MODEL_FEATURES]
-# Y también aquí puedes obtener final_interps, diag_label, etc.
-    # 4.2 Interpretaciones IA
+  # 4.2 · Header y tooltip traducidos
+    title_ia = traducir("🔍 Interpretaciones de cada variable (IA)", idioma)
+    tip_ia   = traducir(
+        "Interpretaciones automáticas y personalizadas, fáciles de entender, generadas con IA.",
+        idioma
+    )
     st.markdown(
-        '<h3 style="display:inline;">🔍 Interpretaciones de cada variable (IA)</h3> '
-        '<span class="tooltip">❔'
-        '<span class="tiptext">Interpretaciones automáticas y personalizadas, fáciles de entender, generadas con IA.</span>'
-        '</span>', 
+        f'<h3 style="display:inline;">{title_ia}</h3> '
+        f'<span class="tooltip">❔'
+        f'<span class="tiptext">{tip_ia}</span>'
+        f'</span>',
         unsafe_allow_html=True
     )
 
-    # --- Generación del prompt para Gemini ---
+    # --- Generación del prompt (SIEMPRE EN ESPAÑOL para calidad) ---
     detalles = []
-    for f, _, clip_val, _, _ in rows:
-        desc = FEATURE_DESCRIPTIONS.get(f, "")
-        detalles.append(f"{f}: {desc} | Valor actual (clip): {clip_val:.3f}")
-
+    for feat in MODEL_FEATURES:
+        desc = FEATURE_DESCRIPTIONS.get(feat, "")
+        clip_val = clip[feat]                  # el valor «clip» de esa feature
+        detalles.append(
+            f"{feat}: {desc} | Valor actual (clip): {clip_val:.3f}"
+        )
     detalle = "\n".join(detalles)
+
     prompt = (
         "Eres un experto en análisis de voz y Parkinson. "
         "A continuación verás una lista de variables extraídas de la voz, con su descripción y su valor actual (clip). "
         "Para cada variable, haz lo siguiente:\n"
         "1. Explica en una sola frase y SIN REPETIR, qué mide esa variable (usa la descripción).\n"
-        "2. Da una pequeña recomendación, comentario, o feedback positivo para el usuario sobre su voz, usando sólo el valor actual (clip), nunca repitas la misma frase para más de una variable. "
-        "No uses tecnicismos ni digas 'no se detectó variación'. "
+        "2. Da una pequeña recomendación, comentario o feedback positivo sobre tu voz, usando sólo el valor actual (clip). "
         "Habla directo al usuario, con lenguaje humano y cálido.\n\n"
-        "Variables:\n"
-        + detalle
+        "Variables:\n" + detalle
     )
 
+    # Llamada a Gemini
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
-    res = requests.post(url,
+    res = requests.post(
+        url,
         params={"key": GEMINI_KEY},
         headers={"Content-Type":"application/json"},
         json={"contents":[{"parts":[{"text":prompt}]}]},
         timeout=10
     )
-    text_ia = res.json().get("candidates",[{}])[0] \
-        .get("content",{}).get("parts",[{}])[0] \
-        .get("text","Error IA")
+    text_ia = (
+        res.json()
+           .get("candidates",[{}])[0]
+           .get("content",{})
+           .get("parts",[{}])[0]
+           .get("text","Error IA")
+    )
 
+    # 4.2.a · Traducir respuesta de Gemini si hace falta
+    if idioma != "es":
+        text_ia = traducir(text_ia, idioma)
+
+    # Parseo de líneas
     lines = [l.strip() for l in text_ia.splitlines() if l.strip()]
     if len(lines) == 1 and ";" in lines[0]:
         lines = [seg.strip() for seg in lines[0].split(";") if seg.strip()]
@@ -223,26 +287,32 @@ if st.session_state.get("analyzed"):
             var, desc = ln.split(":",1)
             parsed[var.strip()] = desc.strip()
 
+    # Construcción de final_interps (ya en el idioma seleccionado)
     final_interps = []
     for feat in MODEL_FEATURES:
         desc = parsed.get(feat)
         if not desc:
-            desc = (
-                f"{FEATURE_DESCRIPTIONS.get(feat,'Este indicador de voz es relevante.')} "
-                "Recuerda mantener tu voz clara y relajada."
+            fallback = traducir(
+                "Este indicador de voz es relevante. Recuerda mantener tu voz clara y relajada.",
+                idioma
             )
+            desc = fallback
         final_interps.append((feat, desc))
 
-    df_ia = pd.DataFrame(final_interps, columns=["Variable","Interpretación"])
+    # 4.2.b · Tabla con cabeceras traducidas
+    col_var    = traducir("Variable", idioma)
+    col_interp = traducir("Interpretación", idioma)
+    df_ia = pd.DataFrame(final_interps, columns=[col_var, col_interp])
     st.dataframe(df_ia, use_container_width=True)
     
     # st.write("DEBUG JSON Gemini:", res.json())  # Muestra el JSON completo recibido
 
 
-    # 4.3 Diagnóstico con tarjetas y paciente personalizado
+    # ── 4.3 Diagnóstico con tarjetas y paciente personalizado ────────
     sano_p, park_p = proba[1], proba[0]
     paciente = st.session_state.get("paciente", "Paciente")
 
+    # Determinar estado
     if sano_p >= 0.7:
         estado = "saludable"
     elif park_p >= 0.7:
@@ -250,34 +320,32 @@ if st.session_state.get("analyzed"):
     else:
         estado = "intermedio"
 
-
+    # Plantilla de cards (en español, luego traducimos)
     cards = {
         "saludable": {
             "icon": "✅",
             "title": f"¡{paciente}, tu estado es Saludable!",
-            "text": f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
+            "text":  f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
         },
         "intermedio": {
             "icon": "⚠️",
             "title": f"{paciente}, estado Intermedio",
-            "text": f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
+            "text":  f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
         },
         "riesgo": {
             "icon": "❌",
             "title": f"{paciente}, Alto Riesgo",
-            "text": f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
+            "text":  f"Sano {sano_p:.1%} · Parkinson {park_p:.1%}"
         }
     }
-    bg_colors = {
-        "saludable": "#2ecc71",
-        "intermedio": "#f1c40f",
-        "riesgo": "#e74c3c"
-    }
-    inactive_bg = "#f0f0f0"
-    active_text = "#ffffff"
-    inactive_text = "#333333"
 
-    st.subheader("🩺 Resultado y Recomendaciones")
+    # Colores
+    bg_colors = {"saludable": "#2ecc71","intermedio": "#f1c40f","riesgo": "#e74c3c"}
+    inactive_bg, active_text, inactive_text = "#f0f0f0","#ffffff","#333333"
+
+    # Subheader
+    st.subheader(traducir("🩺 Resultado y Recomendaciones", idioma))
+
     cols = st.columns(3)
     for idx, key in enumerate(("saludable","intermedio","riesgo")):
         card = cards[key]
@@ -285,24 +353,29 @@ if st.session_state.get("analyzed"):
         bg = bg_colors[key] if is_active else inactive_bg
         txt_color = active_text if is_active else inactive_text
 
+        # traducir título y texto
+        title = traducir(card["title"], idioma)
+        text  = traducir(card["text"],  idioma)
+
         card_html = f"""
         <div style="
-        background-color: {bg};
-        color: {txt_color};
-        border-radius: 8px;
-        padding: 0.8rem;
-        text-align: center;
-        box-shadow: 0 3px 8px rgba(0,0,0,0.1);
-        font-family: sans-serif;
+            background-color: {bg};
+            color: {txt_color};
+            border-radius: 8px;
+            padding: 0.8rem;
+            text-align: center;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+            font-family: sans-serif;
         ">
         <div style="font-size: 2rem;">{card['icon']}</div>
-        <h4 style="margin:0.2rem 0; font-size:1.1rem;">{card['title']}</h4>
-        <small style="font-size:0.9rem;">{card['text']}</small>
+        <h4 style="margin:0.2rem 0; font-size:1.1rem;">{title}</h4>
+        <small style="font-size:0.9rem;">{text}</small>
         </div>
         """
         cols[idx].markdown(card_html, unsafe_allow_html=True)
 
-    # Recomendación IA breve
+    # ── 4.4 Recomendación IA breve (¡fuera del for!) ───────────────────
+    # Prompt en español
     diag_prompt = (
         f"Paciente: {paciente}. Probabilidades: Sano {sano_p:.1%}, Parkinson {park_p:.1%}. "
         "Dame una recomendación breve y empática (máx 30 palabras)."
@@ -314,34 +387,49 @@ if st.session_state.get("analyzed"):
         json={"contents":[{"parts":[{"text":diag_prompt}]}]},
         timeout=10
     )
-    rec_ia = res.json().get("candidates",[{}])[0] \
-                .get("content",{}).get("parts",[{}])[0] \
-                .get("text","")
-    st.markdown("#### Recomendación breve")
+    rec_ia = (
+        res.json()
+        .get("candidates",[{}])[0]
+        .get("content",{})
+        .get("parts",[{}])[0]
+        .get("text","")
+    )
+
+    # Traducir respuesta si es necesario
+    if idioma != "es":
+        rec_ia = traducir(rec_ia, idioma)
+
+    # Títulos y fallback traducidos
+    st.markdown(traducir("#### Recomendación breve", idioma))
+    fallback = traducir("No se pudo obtener la recomendación IA.", idioma)
+
     st.markdown(
         f"""
         <div style='
-            background: #e0f7fa;               /* Fondo celeste claro */
-            border-left: 6px solid #00796b;    /* Borde verde azulado */
+            background: #e0f7fa;
+            border-left: 6px solid #00796b;
             border-radius: 8px;
             padding: 1rem 1.3rem;
             margin-bottom: 1rem;
             font-size: 1.15rem;
-            color: #114155;                    /* Letra azul oscuro */
+            color: #114155;
             font-weight: 500;
         '>
-        💡 {rec_ia or 'No se pudo obtener la recomendación IA.'}
+        💡 {rec_ia or fallback}
         </div>
         """,
         unsafe_allow_html=True
     )
 
 
+    # --- 4.5 Recomendación extensa (IA) para el PDF con traducción ---
 
-# --- Genera recomendación extensa (IA) para el PDF ---
+    # 1) Prompt en español para Gemini
     prompt_ext = (
-        f"Eres un médico empático experto en Parkinson. Explica al paciente {paciente} el resultado de su análisis de voz "
-        f"(Sano: {sano_p:.1%}, Parkinson: {park_p:.1%}), qué significa para su salud, y da consejos útiles para la vida diaria y cuándo consultar con un especialista. Máx 170 palabras."
+        f"Eres un médico empático experto en Parkinson. Explica al paciente {paciente} "
+        f"el resultado de su análisis de voz (Sano: {sano_p:.1%}, Parkinson: {park_p:.1%}), "
+        "qué significa para su salud, y da consejos útiles para la vida diaria y cuándo consultar "
+        "con un especialista. Máx 170 palabras."
     )
     res_ext = requests.post(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
@@ -350,12 +438,19 @@ if st.session_state.get("analyzed"):
         json={"contents":[{"parts":[{"text":prompt_ext}]}]},
         timeout=15
     )
-    recomendacion_extensa = res_ext.json().get("candidates",[{}])[0] \
-                .get("content",{}).get("parts",[{}])[0] \
-                .get("text","Consulta siempre a un especialista si tienes dudas sobre tu salud.")
+    recomendacion_extensa = (
+        res_ext.json()
+            .get("candidates",[{}])[0]
+            .get("content",{})
+            .get("parts",[{}])[0]
+            .get("text", "Consulta siempre a un especialista si tienes dudas sobre tu salud.")
+    )
 
-    
-    
+    # 2) Traducir la recomendación si el idioma no es español
+    if idioma != "es":
+        recomendacion_extensa = traducir(recomendacion_extensa, idioma)
+
+    # 3) Definir diag_label en español y luego traducir
     if estado == "saludable":
         diag_label = "Estado saludable"
     elif estado == "riesgo":
@@ -363,122 +458,169 @@ if st.session_state.get("analyzed"):
     else:
         diag_label = "Estado intermedio"
 
+    # traducimos diag_label
+    diag_label = traducir(diag_label, idioma)
 
 
-    # --- BLOQUE PDF (DENTRO DEL IF) ---
+
+    # ——— BLOQUE PDF CON TRADUCCIÓN ———
     from fpdf import FPDF
     from datetime import datetime
-
-    def sanitize(txt:str)->str:
-        return txt.encode("latin-1","ignore").decode("latin-1")
-
-    # --- BLOQUE PDF MEJORADO ---
-    pdf = FPDF(format="A4")
-    pdf.set_left_margin(15)
-    pdf.set_right_margin(15)
-    pdf.set_top_margin(12)
-    pdf.add_page()
-    pdf.set_auto_page_break(True, margin=15)
 
     def sanitize(txt: str) -> str:
         return txt.encode("latin-1", "ignore").decode("latin-1")
 
-    # Encabezado y fecha, alineados
+    # Creación del PDF
+    pdf = FPDF(format="A4")
+    pdf.set_left_margin(15)
+    pdf.set_right_margin(15)
+    pdf.set_top_margin(12)
+    pdf.set_auto_page_break(True, margin=15)
+    pdf.add_page()
+
+    # Encabezado traducido y fecha
+    titulo_pdf = traducir("Reporte Personalizado de Fonética Vocal y Parkinson", idioma)
+    label_pac = traducir("Paciente:", idioma)
+    label_fecha = traducir("Fecha de análisis:", idioma)
+
     pdf.set_font("Helvetica","B",16)
-    pdf.cell(0, 12, "Reporte Personalizado de Fonética Vocal y Parkinson", ln=True, align="C")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, f"Paciente: {paciente}", ln=True)
-    pdf.cell(0, 8, f"Fecha de análisis: {datetime.now():%Y-%m-%d %H:%M:%S}", ln=True, align="R")
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 8, sanitize("Hola, espero que tengas una excelente jornada. Este reporte es un resumen detallado del análisis de tu voz para apoyar el cuidado de tu salud."))
+    pdf.cell(0, 12, sanitize(titulo_pdf), ln=True, align="C")
+    pdf.set_font("Helvetica","",11)
+    pdf.cell(0, 8, sanitize(f"{label_pac} {paciente}"), ln=True)
+    pdf.cell(0, 8, sanitize(f"{label_fecha} {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=True, align="R")
     pdf.ln(4)
 
-    # Variables
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Variables Analizadas", ln=True)
-    pdf.set_font("Helvetica", "B", 10)
+    # Introducción
+    intro = traducir(
+        "Hola, espero que tengas una excelente jornada. Este reporte es un resumen detallado del análisis de tu voz para apoyar el cuidado de tu salud.",
+        idioma
+    )
+    pdf.set_font("Helvetica","",11)
+    pdf.multi_cell(0, 8, sanitize(intro))
+    pdf.ln(4)
+
+    # Sección Variables
+    sec_vars = traducir("Variables Analizadas", idioma)
+    pdf.set_font("Helvetica","B",13)
+    pdf.cell(0, 8, sanitize(sec_vars), ln=True)
+
+    # Tabla de variables
     col_w = [60, 35, 35]
-    pdf.cell(col_w[0], 7, "Variable", 1, 0, "C")
-    pdf.cell(col_w[1], 7, "Bruto", 1, 0, "C")
-    pdf.cell(col_w[2], 7, "Clip", 1, 1, "C")
-    pdf.set_font("Helvetica", "", 9)
+    cols = [
+        traducir("Variable", idioma),
+        traducir("Bruto", idioma),
+        traducir("Clip", idioma),
+    ]
+    pdf.set_font("Helvetica","B",10)
+    pdf.cell(col_w[0],7, sanitize(cols[0]),1,0,"C")
+    pdf.cell(col_w[1],7, sanitize(cols[1]),1,0,"C")
+    pdf.cell(col_w[2],7, sanitize(cols[2]),1,1,"C")
+    pdf.set_font("Helvetica","",9)
     for feat, raw_val, clip_val, *_ in rows:
-        pdf.cell(col_w[0], 7, sanitize(str(feat)), 1)
-        pdf.cell(col_w[1], 7, f"{raw_val:.3f}", 1)
-        pdf.cell(col_w[2], 7, f"{clip_val:.3f}", 1)
+        pdf.cell(col_w[0],7,sanitize(str(feat)),1)
+        pdf.cell(col_w[1],7,f"{raw_val:.3f}",1)
+        pdf.cell(col_w[2],7,f"{clip_val:.3f}",1)
         pdf.ln()
     pdf.ln(3)
 
-    # ... después de imprimir la tabla de variables ...
-    pdf.ln(3)
-
-    pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(0, 7,
+    # Explicación de la tabla
+    explic = traducir(
         "En la tabla anterior se muestran las variables extraídas de tu voz. "
         "La columna 'Bruto' representa los valores originales captados de tu grabación, "
         "mientras que 'Clip' corresponde a los valores ajustados al rango estándar de referencia. "
-        "Estas mediciones ayudan a analizar características de tu voz que pueden relacionarse con salud vocal y detección temprana de Parkinson."
+        "Estas mediciones ayudan a analizar características de tu voz que pueden relacionarse con salud vocal y detección temprana de Parkinson.",
+        idioma
     )
-    pdf.ln(2)
-
-
-    # Interpretaciones IA
-# Ajuste visual y de salto correcto para cada fila de la tabla IA
-    from math import ceil
-
-    pdf.add_page()  # <-- Esto fuerza que la tabla IA vaya a la siguiente hoja
-
-    # Ahora imprime la tabla de interpretaciones IA con el bloque mejorado:
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Interpretación de cada variable (IA)", ln=True)
-    pdf.set_font("Helvetica", "B", 10)
-    col_w2 = [60, 110]
-    pdf.cell(col_w2[0], 10, "Variable", 1, 0, "C")
-    pdf.cell(col_w2[1], 10, "Interpretación", 1, 1, "C")
-    pdf.set_font("Helvetica", "", 9)
-
-    cell_height = 8
-
-    for var, desc in final_interps:
-        x = pdf.get_x()
-        y = pdf.get_y()
-        n_lines_desc = max(2, int(pdf.get_string_width(desc) / (col_w2[1] - 10)) + 1)
-        row_h = n_lines_desc * cell_height
-
-        pdf.multi_cell(col_w2[0], row_h, sanitize(var), border=1, align="L", ln=3)
-        pdf.set_xy(x + col_w2[0], y)
-        pdf.multi_cell(col_w2[1], cell_height, sanitize(desc), border=1, align="L")
-        pdf.set_xy(x, y + row_h)
-
-    pdf.ln(2)
-
-
-
-    # Diagnóstico
-    pdf.add_page() 
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Resultados del análisis", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(0, 80, 0) # Verde oscuro para destacar
-    pdf.multi_cell(0, 7, sanitize(
-        f"Diagnóstico: {diag_label}\n"
-        f"Probabilidad Sano: {sano_p:.1%} | Probabilidad Parkinson: {park_p:.1%}\n"
-        f"Frase IA: {rec_ia}"
-    ))
-    pdf.set_text_color(0,0,0)
-    pdf.ln(2)
-
-    # Recomendación extensa
-    pdf.set_font("Helvetica", "B", 13)
-    pdf.cell(0, 8, "Recomendaciones personalizadas", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(0, 7, sanitize(recomendacion_extensa))
+    pdf.set_font("Helvetica","",10)
+    pdf.multi_cell(0,7, sanitize(explic))
     pdf.ln(4)
 
-    pdf_bytes = bytes(pdf.output(dest="S"))
-    st.download_button("📥 Descargar Informe detallado (PDF)",
-                    data=pdf_bytes,
-                    file_name=f"reporte_{paciente.replace(' ','_')}.pdf",
-                    mime="application/pdf",
-                    key="download_pdf")
+    # Sección Interpretaciones IA
+    pdf.set_font("Helvetica","B",13)
+    pdf.cell(0,8, sanitize(traducir("Interpretación de cada variable (IA)",idioma)), ln=True)
+    pdf.set_font("Helvetica","B",10)
+    w_feat, w_interp = 60, 110
+    pdf.cell(w_feat,10, sanitize(traducir("Variable",idioma)),1,0,"C")
+    pdf.cell(w_interp,10, sanitize(traducir("Interpretación",idioma)),1,1,"C")
+    pdf.set_font("Helvetica","",9)
+    cell_h = 8
+
+    for feat, texto in final_interps:
+        x, y = pdf.get_x(), pdf.get_y()
+        # calcula altura en función de la longitud del texto
+        n_lines = max(1, int(pdf.get_string_width(texto)/(w_interp-4))+1)
+        row_h = n_lines * cell_h
+
+    pdf.multi_cell(w_feat, row_h, sanitize(feat), border=1, align="L", ln=3)
+    pdf.set_xy(x+w_feat, y)
+    pdf.multi_cell(w_interp, cell_h, sanitize(texto), border=1, align="L")
+    pdf.set_xy(x, y+row_h)
+    pdf.ln(4)
+
+    # Sección Resultados
+    sec_res = traducir("Resultados del análisis", idioma)
+    label_diag = traducir("Diagnóstico:", idioma)
+    label_ps = traducir("Probabilidad Sano:", idioma)
+    label_pp = traducir("Probabilidad Parkinson:", idioma)
+
+    pdf.set_font("Helvetica","B",13)
+    pdf.cell(0,8, sanitize(sec_res), ln=True)
+    pdf.set_font("Helvetica","",10)
+    pdf.set_text_color(0,80,0)
+    texto_res = (
+        f"{label_diag} {diag_label}\n"
+        f"{label_ps} {sano_p:.1%} | {label_pp} {park_p:.1%}"
+    )
+    pdf.multi_cell(0,7, sanitize(texto_res))
+    pdf.set_text_color(0,0,0)
+    pdf.ln(4)
+
+    # Sección Recomendaciones (extensa)
+    sec_rec = traducir("Recomendaciones personalizadas", idioma)
+    pdf.set_font("Helvetica","B",13)
+    pdf.cell(0,8, sanitize(sec_rec), ln=True)
+    pdf.set_font("Helvetica","",10)
+    pdf.multi_cell(0,7, sanitize(recomendacion_extensa))
+    pdf.ln(4)
+# … justo después de haber terminado de pintar TODO el PDF …
+
+    # 1) Saca la “cadena” que genera FPDF
+    raw = pdf.output(dest="S")
+
+    # 2) Conviértela siempre a bytes
+    if isinstance(raw, str):
+        pdf_bytes = raw.encode("latin-1")
+    else:
+        # cubre bytearray y bytes
+        pdf_bytes = bytes(raw)
+
+# … justo después de haber generado pdf_bytes …
+
+    # Dos columnas para alinear los botones
+    c1, c2 = st.columns(2)
+
+    # Botón 1: Informe detallado
+    with c1:
+        st.download_button(
+            label=traducir("📥 Descargar Informe detallado (PDF)", idioma),
+            data=pdf_bytes,
+            file_name=f"reporte_{paciente.replace(' ','_')}.pdf",
+            mime="application/pdf",
+            key="download_detailed_report"
+        )
+
+    # Botón 2: Reporte ML pre-generado
+    with c2:
+        # Lee el PDF que ya tienes en models/reporte_modelos.pdf
+        try:
+            with open("models/reporte_modelos.pdf", "rb") as f:
+                ml_report = f.read()
+            st.download_button(
+                label=traducir("📥 Descargar Reporte ML (PDF)", idioma),
+                data=ml_report,
+                file_name="reporte_modelos.pdf",
+                mime="application/pdf",
+                key="download_ml_report"
+            )
+        except FileNotFoundError:
+            st.error(traducir("No se encontró el reporte ML en la carpeta models.", idioma))
