@@ -5,8 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) 
 [![Model: KNN](https://img.shields.io/badge/Model-KNN-blueviolet)](#cómo-funciona)
 
-**Parkinson Detector** es una aplicación web que analiza una grabación de voz de ≥ 5 segundos (vocal sostenida) y, mediante un modelo **K‑Nearest Neighbors** entrenado sobre el *Oxford Parkinson’s Disease Detection Dataset*, estima la probabilidad de enfermedad de Parkinson.  
-Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en lenguaje natural y un informe PDF descargable con todas las métricas.
+**Parkinson Detector** es una aplicación web que analiza una grabación de voz de ≥ 5 segundos (vocal sostenida) y, mediante un modelo **SVM** entrenado sobre el *Oxford Parkinson’s Disease Detection Dataset*, estima la probabilidad de enfermedad de Parkinson. Además, incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en lenguaje natural y un informe PDF descargable con todas las métricas. 
+
 
 <p align="center">
   <img src="docs/images/demo_workflow.gif" width="620" alt="GIF de la aplicación">
@@ -27,18 +27,29 @@ Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en len
 
 ## Cómo funciona
 
-### 1. Extracción de características vocales
-* **Parselmouth + Praat** para calcular 14 variables clave (*jitter*, *shimmer*, F0, HNR, PPE, Spread 1/2, RPDE…).  
+* **Parselmouth + Praat** para calcular 3 variables clave (**Spread1**, **MDVP:APQ**, **MDVP:Shimmer**).  
+
+### 2. Modelo de clasificación
+* **Support Vector Machine (SVM)** con los mejores hiperparámetros:  
+  ```python
+  best_params = {'kernel': 'rbf', 'C': 100, 'gamma': 1}
+  svm_final = SVC(**best_params, probability=True, random_state=42)
+  svm_final.fit(X_train_s, y_train)
+  ```
+* Métricas de rendimiento (validación cruzada estratificada 10‑fold):  
+  | Métrica      | Train | Test  |
+  |--------------|-------|-------|
+  | **AUC‑ROC**  | 0.951 | 0.921 |
+  | **Accuracy** | 0.885 | 0.949 |
+  | **Precision**| 0.879 | 0.935 |
+  | **Recall**   | 0.983 | 1.000 |
+  | **F1**       | 0.928 | 0.967 |
+  | **MCC**      | 0.669 | 0.865 |
+ 
   * Repo oficial → <https://github.com/YannickJadoul/Parselmouth>  
 * Recorte de silencios, normalización y *clipping* a rangos aprendidos durante el entrenamiento.
 
-### 2. Modelo de clasificación
-* **K‑Nearest Neighbors** (k = 5, ponderación por distancia) + escalado *Min‑Max*.  
-* Validación cruzada estratificada 10‑fold  
-  * **Accuracy ≈ 90 %**  
-  * **AUC ≈ 0.95**  
-  * **MCC ≈ 0.79**  
-* Artefactos serializados en `models/modelo_knn.pkl` y `models/scalador.pkl`.
+* Artefactos serializados en `svm_mcc_final`.
 
 ### 3. IA explicable (XAI)
 * Importancia de variables por permutación + aproximación **SHAP** para KNN.  
@@ -57,13 +68,11 @@ Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en len
 ├─ app.py                # interfaz Streamlit
 ├─ funcion.py            # extracción de features + predicción
 ├─ models/
-│  ├─ modelo_knn.pkl
-│  └─ scalador.pkl
+│  └─ svm_mcc_final.joblib
 ├─ entrenamiento/        # notebooks y dataset
 │  ├─ Parkiston_Prediccion.ipynb
 │  └─ parkinsons.data
 ├─ requirements.txt
-├─ Dockerfile
 ├─ tests/
 ├─ docs/                 # capturas y GIFs
 └─ README.md
@@ -84,8 +93,8 @@ Incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en len
 ### 1 · Entorno virtual
 
 ```bash
-git clone https://github.com/tu‑usuario/Parkinson‑Detector.git
-cd Parkinson‑Detector
+git clone https://github.com/Cesar-AC/parkison_prediccion.git
+cd parkison_prediccion
 python -m venv .venv
 source .venv/bin/activate      # En Windows: .venv\Scripts\activate
 pip install -r requirements.txt
