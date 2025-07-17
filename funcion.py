@@ -3,15 +3,24 @@
 # -------------------------------
 import os, joblib, numpy as np, parselmouth, librosa, soundfile as sf, nolds
 from parselmouth.praat import call
+
+from sklearn.pipeline        import Pipeline
+from sklearn.preprocessing   import StandardScaler
+from sklearn.ensemble        import VotingClassifier, StackingClassifier
+from sklearn.linear_model    import LogisticRegression
+from sklearn.ensemble        import RandomForestClassifier
+from xgboost                 import XGBClassifier
+from sklearn.svm             import SVC
 # -------------------------------
 # 1) CARGAR EL NUEVO PIPELINE
 # -------------------------------
 # Guardaste el pipeline así: {'scaler': StandardScaler(), 'model': SVC(...)}
 # ⇨  carpeta /models/  ──┐
-PIPE_PATH = "models/svm_mcc_final.joblib"
-pipe      = joblib.load(PIPE_PATH)
-escalador = pipe["scaler"]         # StandardScaler
-modelo    = pipe["model"]          # SVC entrenado
+PIPE_SOFT  = "models/soft_voting_parkinson.joblib"
+PIPE_STACK = "models/stacking_parkinson.joblib"
+
+pipe_soft  = joblib.load(PIPE_SOFT)   # Pipeline(StandardScaler + SoftVoting)
+pipe_stack = joblib.load(PIPE_STACK)  # Pipeline(StandardScaler + Stacking)
 
 
 
@@ -76,12 +85,30 @@ def extract_parkinson_features(wav_path: str) -> dict:
         "MDVP:Shimmer": float(0.0 if np.isnan(shimmer) else shimmer)
     }
 
-def predict_parkinson(wav_path: str):
+def predict_parkinson(wav_path: str, method: str = "soft"):
+    """
+    method: "soft" para Voting suave, "stack" para Stacking
+    """
+
+    # --- 2) Extrae y recorta características igual que antes ---
     raw     = extract_parkinson_features(wav_path)
     clipped = { f: np.clip(raw[f], *RANGE[f]) for f in MODEL_FEATURES }
-    X       = np.array([clipped[f] for f in MODEL_FEATURES]).reshape(1,-1)
-    Xs      = escalador.transform(X)
-    y       = modelo.predict(Xs)[0]
-    p       = modelo.predict_proba(Xs)[0]
-    scaled  = { f: Xs[0,i] for i,f in enumerate(MODEL_FEATURES) }
-    return raw, clipped, scaled, y, p
+    X       = np.array([clipped[f] for f in MODEL_FEATURES]).reshape(1, -1)
+
+    # --- 3) Escalado interno + predicción ---
+    if method == "soft":
+        y_pred = pipe_soft.predict(X)[0]
+        proba  = pipe_soft.predict_proba(X)[0]
+        scaler = pipe_soft.named_steps['scaler']
+    elif method == "stack":
+        y_pred = pipe_stack.predict(X)[0]
+        proba  = pipe_stack.predict_proba(X)[0]
+        scaler = pipe_stack.named_steps['scaler']
+    else:
+        raise ValueError("method debe ser 'soft' o 'stack'")
+
+    # --- 4) Si quieres exponer también las features escaladas ---
+    scaled_vals = scaler.transform(X)[0]
+    scaled = { f: scaled_vals[i] for i, f in enumerate(MODEL_FEATURES) }
+
+    return raw, clipped, scaled, y_pred, proba

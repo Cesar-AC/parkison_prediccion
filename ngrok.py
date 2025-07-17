@@ -3,7 +3,7 @@ import time
 from pyngrok import ngrok, conf
 
 # CONFIGURA TU TOKEN AQUÍ
-NGROK_AUTH_TOKEN = "2z4EnVUZMa4H6gDPsWp5Z59eGUt_49BX1fJ2HwbaxkENYNcNJ"
+NGROK_AUTH_TOKEN = "2zvWpeGXhF309pEIEJkUx67GJYp_4CuntbHqFUC1WfZ9zqsan"
 
 # NOMBRE DE TU APP STREAMLIT
 STREAMLIT_APP = "app.py"

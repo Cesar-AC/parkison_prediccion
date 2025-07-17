@@ -95,15 +95,21 @@ display_name, idioma = st.selectbox(
 st.session_state["idioma"] = idioma  # ahora idioma es un string: "es", "en", etc.
 
 
+@st.cache_data(show_spinner=False)
 def traducir(texto: str, dest: str) -> str:
-    if dest == "es":
-        return texto  # no traduce si el destino es español
+    # Si está en español, o texto es None o vacío, devuelvo tal cual (o cadena vacía)
+    if dest == "es" or not texto:
+        return texto or ""
     try:
-        return translator.translate(texto, dest=dest).text
+        # Aseguro que texto es str
+        texto_str = str(texto)
+        return translator.translate(texto_str, dest=dest).text
     except Exception:
-        # registra el error en consola/archivo, pero no en la UI
         logging.exception("Error traduciendo texto")
-        return texto
+        # En caso de fallo, devuelvo el texto original
+        return texto_str
+
+
 
 
 # ── 0 · Bienvenida y datos del paciente ─────────────────────────────
@@ -464,163 +470,217 @@ if st.session_state.get("analyzed"):
 
 
     # ——— BLOQUE PDF CON TRADUCCIÓN ———
+
+
     from fpdf import FPDF
     from datetime import datetime
+    import streamlit as st
 
-    def sanitize(txt: str) -> str:
-        return txt.encode("latin-1", "ignore").decode("latin-1")
+    @st.cache_data(show_spinner=False)
+    def build_report_pdf(
+        paciente: str,
+        rows,
+        final_interps,
+        diag_label: str,
+        sano_p: float,
+        park_p: float,
+        recomendacion_extensa: str,
+        idioma: str
+    ) -> bytes:
+        """
+        Construye y devuelve los bytes del PDF.
+        Se cachea, de modo que la primera ejecución tarde,
+        y las siguientes sean instantáneas.
+        """
+        def sanitize(txt: str) -> str:
+            return txt.encode("latin-1", "ignore").decode("latin-1")
 
-    # Creación del PDF
-    pdf = FPDF(format="A4")
-    pdf.set_left_margin(15)
-    pdf.set_right_margin(15)
-    pdf.set_top_margin(12)
-    pdf.set_auto_page_break(True, margin=15)
-    pdf.add_page()
+        pdf = FPDF(format="A4")
+        pdf.set_left_margin(15); pdf.set_right_margin(15)
+        pdf.set_top_margin(12); pdf.set_auto_page_break(True, margin=15)
+        pdf.add_page()
 
-    # Encabezado traducido y fecha
-    titulo_pdf = traducir("Reporte Personalizado de Fonética Vocal y Parkinson", idioma)
-    label_pac = traducir("Paciente:", idioma)
-    label_fecha = traducir("Fecha de análisis:", idioma)
+        # — Encabezado —
+        titulo_pdf = traducir("Reporte Personalizado de Fonética Vocal y Parkinson", idioma)
+        label_pac  = traducir("Paciente:", idioma)
+        label_fecha= traducir("Fecha de análisis:", idioma)
 
-    pdf.set_font("Helvetica","B",16)
-    pdf.cell(0, 12, sanitize(titulo_pdf), ln=True, align="C")
-    pdf.set_font("Helvetica","",11)
-    pdf.cell(0, 8, sanitize(f"{label_pac} {paciente}"), ln=True)
-    pdf.cell(0, 8, sanitize(f"{label_fecha} {datetime.now():%Y-%m-%d %H:%M:%S}"), ln=True, align="R")
-    pdf.ln(4)
+        pdf.set_font("Helvetica","B",16)
+        pdf.cell(0, 12, sanitize(titulo_pdf), ln=True, align="C")
+        pdf.set_font("Helvetica","",11)
+        pdf.cell(0, 8, sanitize(f"{label_pac} {paciente}"), ln=True)
+        pdf.cell(0, 8,
+                sanitize(f"{label_fecha} {datetime.now():%Y-%m-%d %H:%M:%S}"),
+                ln=True, align="R")
+        pdf.ln(4)
 
-    # Introducción
-    intro = traducir(
-        "Hola, espero que tengas una excelente jornada. Este reporte es un resumen detallado del análisis de tu voz para apoyar el cuidado de tu salud.",
-        idioma
-    )
-    pdf.set_font("Helvetica","",11)
-    pdf.multi_cell(0, 8, sanitize(intro))
-    pdf.ln(4)
+        # — Introducción —
+        intro = traducir(
+            "Hola, espero que tengas una excelente jornada. "
+            "Este reporte es un resumen detallado del análisis de tu voz "
+            "para apoyar el cuidado de tu salud.",
+            idioma
+        )
+        pdf.set_font("Helvetica","",11)
+        pdf.multi_cell(0, 8, sanitize(intro))
+        pdf.ln(4)
 
-    # Sección Variables
-    sec_vars = traducir("Variables Analizadas", idioma)
-    pdf.set_font("Helvetica","B",13)
-    pdf.cell(0, 8, sanitize(sec_vars), ln=True)
+        # — Tabla de Variables —
+        sec_vars = traducir("Variables Analizadas", idioma)
+        pdf.set_font("Helvetica","B",13)
+        pdf.cell(0, 8, sanitize(sec_vars), ln=True)
 
-    # Tabla de variables
-    col_w = [60, 35, 35]
-    cols = [
-        traducir("Variable", idioma),
-        traducir("Bruto", idioma),
-        traducir("Clip", idioma),
-    ]
-    pdf.set_font("Helvetica","B",10)
-    pdf.cell(col_w[0],7, sanitize(cols[0]),1,0,"C")
-    pdf.cell(col_w[1],7, sanitize(cols[1]),1,0,"C")
-    pdf.cell(col_w[2],7, sanitize(cols[2]),1,1,"C")
-    pdf.set_font("Helvetica","",9)
-    for feat, raw_val, clip_val, *_ in rows:
-        pdf.cell(col_w[0],7,sanitize(str(feat)),1)
-        pdf.cell(col_w[1],7,f"{raw_val:.3f}",1)
-        pdf.cell(col_w[2],7,f"{clip_val:.3f}",1)
+        col_w = [60, 35, 35]
+        headers = [
+            traducir("Variable", idioma),
+            traducir("Bruto", idioma),
+            traducir("Clip", idioma),
+        ]
+        pdf.set_font("Helvetica","B",10)
+        for w, h in zip(col_w, headers):
+            pdf.cell(w, 7, sanitize(h), 1, 0, "C")
         pdf.ln()
-    pdf.ln(3)
+        pdf.set_font("Helvetica","",9)
+        for feat, raw_val, clip_val, *_ in rows:
+            pdf.cell(col_w[0],7,sanitize(str(feat)),1)
+            pdf.cell(col_w[1],7,f"{raw_val:.3f}",1)
+            pdf.cell(col_w[2],7,f"{clip_val:.3f}",1)
+            pdf.ln()
+        pdf.ln(3)
 
-    # Explicación de la tabla
-    explic = traducir(
-        "En la tabla anterior se muestran las variables extraídas de tu voz. "
-        "La columna 'Bruto' representa los valores originales captados de tu grabación, "
-        "mientras que 'Clip' corresponde a los valores ajustados al rango estándar de referencia. "
-        "Estas mediciones ayudan a analizar características de tu voz que pueden relacionarse con salud vocal y detección temprana de Parkinson.",
-        idioma
-    )
-    pdf.set_font("Helvetica","",10)
-    pdf.multi_cell(0,7, sanitize(explic))
-    pdf.ln(4)
+        # — Explicación de la Tabla —
+        explic = traducir(
+            "En la tabla anterior se muestran las variables extraídas de tu voz. "
+            "La columna 'Bruto' representa los valores originales captados de tu grabación, "
+            "mientras que 'Clip' corresponde a los valores ajustados al rango estándar de referencia. "
+            "Estas mediciones ayudan a analizar características de tu voz que pueden relacionarse "
+            "con salud vocal y detección temprana de Parkinson.",
+            idioma
+        )
+        pdf.set_font("Helvetica","",10)
+        pdf.multi_cell(0,7,sanitize(explic))
+        pdf.ln(4)
 
-    # Sección Interpretaciones IA
-    pdf.set_font("Helvetica","B",13)
-    pdf.cell(0,8, sanitize(traducir("Interpretación de cada variable (IA)",idioma)), ln=True)
-    pdf.set_font("Helvetica","B",10)
-    w_feat, w_interp = 60, 110
-    pdf.cell(w_feat,10, sanitize(traducir("Variable",idioma)),1,0,"C")
-    pdf.cell(w_interp,10, sanitize(traducir("Interpretación",idioma)),1,1,"C")
-    pdf.set_font("Helvetica","",9)
-    cell_h = 8
+        # — Interpretaciones IA —
+        pdf.set_font("Helvetica","B",13)
+        pdf.cell(0, 8, sanitize(traducir("Interpretación de cada variable (IA)", idioma)), ln=True)
+        pdf.set_font("Helvetica","B",10)
 
-    for feat, texto in final_interps:
-        x, y = pdf.get_x(), pdf.get_y()
-        # calcula altura en función de la longitud del texto
-        n_lines = max(1, int(pdf.get_string_width(texto)/(w_interp-4))+1)
-        row_h = n_lines * cell_h
+        # Ancho de columnas
+        w_feat, w_interp = 60, 110
+        cell_h = 6  # altura de línea
 
-    pdf.multi_cell(w_feat, row_h, sanitize(feat), border=1, align="L", ln=3)
-    pdf.set_xy(x+w_feat, y)
-    pdf.multi_cell(w_interp, cell_h, sanitize(texto), border=1, align="L")
-    pdf.set_xy(x, y+row_h)
-    pdf.ln(4)
+        # Cabecera
+        pdf.cell(w_feat, 10, sanitize(traducir("Variable", idioma)), 1, 0, "C")
+        pdf.cell(w_interp, 10, sanitize(traducir("Interpretación", idioma)), 1, 1, "C")
 
-    # Sección Resultados
-    sec_res = traducir("Resultados del análisis", idioma)
-    label_diag = traducir("Diagnóstico:", idioma)
-    label_ps = traducir("Probabilidad Sano:", idioma)
-    label_pp = traducir("Probabilidad Parkinson:", idioma)
+        pdf.set_font("Helvetica","",9)
 
-    pdf.set_font("Helvetica","B",13)
-    pdf.cell(0,8, sanitize(sec_res), ln=True)
-    pdf.set_font("Helvetica","",10)
-    pdf.set_text_color(0,80,0)
-    texto_res = (
-        f"{label_diag} {diag_label}\n"
-        f"{label_ps} {sano_p:.1%} | {label_pp} {park_p:.1%}"
-    )
-    pdf.multi_cell(0,7, sanitize(texto_res))
-    pdf.set_text_color(0,0,0)
-    pdf.ln(4)
+        for feat, texto in final_interps:
+            # punto de partida de la fila
+            x0, y0 = pdf.get_x(), pdf.get_y()
 
-    # Sección Recomendaciones (extensa)
-    sec_rec = traducir("Recomendaciones personalizadas", idioma)
-    pdf.set_font("Helvetica","B",13)
-    pdf.cell(0,8, sanitize(sec_rec), ln=True)
-    pdf.set_font("Helvetica","",10)
-    pdf.multi_cell(0,7, sanitize(recomendacion_extensa))
-    pdf.ln(4)
-# … justo después de haber terminado de pintar TODO el PDF …
+            # 1) Imprime la variable en la 1ª columna
+            pdf.multi_cell(w_feat, cell_h, sanitize(feat), border=1)
 
-    # 1) Saca la “cadena” que genera FPDF
-    raw = pdf.output(dest="S")
+            # Guarda hasta dónde llegó la 1ª columna
+            y_feat_end = pdf.get_y()
 
-    # 2) Conviértela siempre a bytes
-    if isinstance(raw, str):
-        pdf_bytes = raw.encode("latin-1")
-    else:
-        # cubre bytearray y bytes
-        pdf_bytes = bytes(raw)
+            # 2) Imprime la interpretación en la 2ª columna,
+            #    regresando al tope de la fila
+            pdf.set_xy(x0 + w_feat, y0)
+            pdf.multi_cell(w_interp, cell_h, sanitize(texto), border=1)
 
-# … justo después de haber generado pdf_bytes …
+            # Guarda hasta dónde llegó la 2ª columna
+            y_interp_end = pdf.get_y()
 
-    # Dos columnas para alinear los botones
+            # 3) Posiciona el cursor en la siguiente fila,
+            #    al tope de la más alta de las dos columnas
+            pdf.set_xy(x0, max(y_feat_end, y_interp_end))
+
+        # un poco de espacio tras la tabla
+        pdf.ln(4)
+
+
+        # — Resultados y Recomendaciones —
+        sec_res   = traducir("Resultados del análisis", idioma)
+        label_diag= traducir("Diagnóstico:", idioma)
+        label_ps  = traducir("Probabilidad Sano:", idioma)
+        label_pp  = traducir("Probabilidad Parkinson:", idioma)
+
+        pdf.set_font("Helvetica","B",13)
+        pdf.cell(0,8,sanitize(sec_res), ln=True)
+        pdf.set_font("Helvetica","",10)
+        pdf.set_text_color(0,80,0)
+        texto_res = (
+            f"{label_diag} {diag_label}\n"
+            f"{label_ps} {sano_p:.1%} | {label_pp} {park_p:.1%}"
+        )
+        pdf.multi_cell(0,7,sanitize(texto_res))
+        pdf.set_text_color(0,0,0)
+        pdf.ln(4)
+
+        sec_rec = traducir("Recomendaciones personalizadas", idioma)
+        pdf.set_font("Helvetica","B",13)
+        pdf.cell(0,8,sanitize(sec_rec), ln=True)
+        pdf.set_font("Helvetica","",10)
+        pdf.multi_cell(0,7,sanitize(recomendacion_extensa))
+        pdf.ln(4)
+
+        # Output final
+        raw = pdf.output(dest="S")
+        return raw.encode("latin-1") if isinstance(raw, str) else bytes(raw)
+
+
+if st.session_state.get("analyzed"):
+    # … ya tienes rows, final_interps, diag_label, sano_p, park_p, recomendacion_extensa …
+
+    # 1) Genera y cachea el PDF detallado solo la primera vez
+    if "pdf_bytes" not in st.session_state:
+        st.session_state.pdf_bytes = build_report_pdf(
+            paciente,
+            rows,
+            final_interps,
+            diag_label,
+            sano_p,
+            park_p,
+            recomendacion_extensa,
+            idioma
+        )
+
+    # 2) Opcional: cachea también el reporte ML pre-generado
+    if "ml_report_bytes" not in st.session_state:
+        try:
+            with open("models/reporte_modelos.pdf", "rb") as f:
+                st.session_state.ml_report_bytes = f.read()
+        except FileNotFoundError:
+            st.session_state.ml_report_bytes = None
+
+    # 3) Dos columnas para los botones de descarga
     c1, c2 = st.columns(2)
 
-    # Botón 1: Informe detallado
+    # Botón 1: Informe detallado (usa el PDF cacheado)
     with c1:
         st.download_button(
             label=traducir("📥 Descargar Informe detallado (PDF)", idioma),
-            data=pdf_bytes,
+            data=st.session_state.pdf_bytes,
             file_name=f"reporte_{paciente.replace(' ','_')}.pdf",
             mime="application/pdf",
             key="download_detailed_report"
         )
 
-    # Botón 2: Reporte ML pre-generado
+    # Botón 2: Reporte ML pre-generado (si existe en cache)
     with c2:
-        # Lee el PDF que ya tienes en models/reporte_modelos.pdf
-        try:
-            with open("models/reporte_modelos.pdf", "rb") as f:
-                ml_report = f.read()
+        if st.session_state.ml_report_bytes:
             st.download_button(
                 label=traducir("📥 Descargar Reporte ML (PDF)", idioma),
-                data=ml_report,
+                data=st.session_state.ml_report_bytes,
                 file_name="reporte_modelos.pdf",
                 mime="application/pdf",
                 key="download_ml_report"
             )
-        except FileNotFoundError:
-            st.error(traducir("No se encontró el reporte ML en la carpeta models.", idioma))
+        else:
+            st.error(traducir(
+                "No se encontró el reporte ML en la carpeta models.",
+                idioma
+            ))
