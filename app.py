@@ -9,9 +9,14 @@ from datetime import datetime
 from googletrans import Translator
 translator = Translator()
 import logging
-
+import os
 # backend
 from funcion import predict_parkinson, MODEL_FEATURES, RANGE
+
+BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+PDF_DIR  = os.path.join(BASE_DIR, "pdf")
+
+
 
 FEATURE_DESCRIPTIONS = {
     "spread1": "Dispersión de la frecuencia fundamental (cuanto más alto → más variación).",
@@ -659,7 +664,7 @@ if st.session_state.get("analyzed"):
     # 3) Dos columnas para los botones de descarga
     c1, c2 = st.columns(2)
 
-    # Botón 1: Informe detallado (usa el PDF cacheado)
+    # Botón 1: Informe detallado (cacheado en session_state)
     with c1:
         st.download_button(
             label=traducir("📥 Descargar Informe detallado (PDF)", idioma),
@@ -669,18 +674,32 @@ if st.session_state.get("analyzed"):
             key="download_detailed_report"
         )
 
-    # Botón 2: Reporte ML pre-generado (si existe en cache)
+    # Botón 2: Reporte ML pre-generado por idioma
     with c2:
-        if st.session_state.ml_report_bytes:
+        lang_map = {
+        "es":    ("espa_parkison.pdf", "Español"),
+        "en":    ("ingl_parkison.pdf", "English"),
+        "fr":    ("fran_parkison.pdf", "Français"),
+        "pt":    ("port_parkison.pdf", "Português"),
+        "zh-cn": ("chin_parkison.pdf", "中文"),
+    }
+    pdf_file, lang_name = lang_map.get(idioma, (None, None))
+
+    if not pdf_file:
+        st.error(traducir("Idioma no soportado para el reporte ML.", idioma))
+    else:
+        pdf_path = os.path.join(PDF_DIR, pdf_file)
+        if not os.path.exists(pdf_path):
+            st.error(traducir("No se encontró el reporte ML para este idioma.", idioma))
+            
+        else:
+            with open(pdf_path, "rb") as f:
+                ml_bytes = f.read()
+            label = traducir(f"📥 Descargar Reporte ML ({lang_name})", idioma)
             st.download_button(
-                label=traducir("📥 Descargar Reporte ML (PDF)", idioma),
-                data=st.session_state.ml_report_bytes,
-                file_name="reporte_modelos.pdf",
+                label=label,
+                data=ml_bytes,
+                file_name=pdf_file,
                 mime="application/pdf",
                 key="download_ml_report"
             )
-        else:
-            st.error(traducir(
-                "No se encontró el reporte ML en la carpeta models.",
-                idioma
-            ))
