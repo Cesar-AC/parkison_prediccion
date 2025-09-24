@@ -7,6 +7,12 @@ from streamlit_mic_recorder import mic_recorder
 from fpdf import FPDF  # still needed for type usage earlier
 from datetime import datetime
 from pdf_report import build_report_pdf
+from gemini_client import (
+    get_feature_interpretations,
+    get_short_recommendation,
+    get_long_recommendation,
+    GeminiError,
+)
 from deep_translator import GoogleTranslator
 import logging
 import os
@@ -24,8 +30,7 @@ FEATURE_DESCRIPTIONS = {
     "MDVP:Shimmer": "Variabilidad ciclo a ciclo en la intensidad de la voz."
 }
 
-GEMINI_KEY = "AIzaSyAoReEdMLGBFiNG3oS089XrPc2OiW43-Fc"
-#GEMINI_KEY = "AIzaSyBRup_GtM7g0Z-_VexcN8zvN-b12fER-0k"
+# Clave movida a gemini_client.py (o variable de entorno GEMINI_KEY)
 
 st.set_page_config(page_title="🎤 Parkinson Detector", layout="wide")
 st.markdown("""
@@ -256,32 +261,10 @@ if st.session_state.get("analyzed"):
         )
     detalle = "\n".join(detalles)
 
-    prompt = (
-        "Eres un experto en análisis de voz y Parkinson. "
-        "A continuación verás una lista de variables extraídas de la voz, con su descripción y su valor actual (clip). "
-        "Para cada variable, haz lo siguiente:\n"
-        "1. Explica en una sola frase y SIN REPETIR, qué mide esa variable (usa la descripción).\n"
-        "2. Da una pequeña recomendación, comentario o feedback positivo sobre tu voz, usando sólo el valor actual (clip). "
-        "Habla directo al usuario, con lenguaje humano y cálido.\n\n"
-        "Variables:\n" + detalle
-    )
-
-    # Llamada a Gemini
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
-    res = requests.post(
-        url,
-        params={"key": GEMINI_KEY},
-        headers={"Content-Type":"application/json"},
-        json={"contents":[{"parts":[{"text":prompt}]}]},
-        timeout=10
-    )
-    text_ia = (
-        res.json()
-           .get("candidates",[{}])[0]
-           .get("content",{})
-           .get("parts",[{}])[0]
-           .get("text","Error IA")
-    )
+    try:
+        text_ia = get_feature_interpretations(detalle)
+    except GeminiError as e:
+        text_ia = f"Error IA: {e}"
 
     # 4.2.a · Traducir respuesta de Gemini si hace falta
     if idioma != "es":
@@ -392,20 +375,10 @@ if st.session_state.get("analyzed"):
         f"Paciente: {paciente}. Probabilidades: Sano {sano_p:.1%}, Parkinson {park_p:.1%}. "
         "Dame una recomendación breve y empática (máx 30 palabras)."
     )
-    res = requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
-        params={"key": GEMINI_KEY},
-        headers={"Content-Type":"application/json"},
-        json={"contents":[{"parts":[{"text":diag_prompt}]}]},
-        timeout=10
-    )
-    rec_ia = (
-        res.json()
-        .get("candidates",[{}])[0]
-        .get("content",{})
-        .get("parts",[{}])[0]
-        .get("text","")
-    )
+    try:
+        rec_ia = get_short_recommendation(paciente, sano_p, park_p)
+    except GeminiError as e:
+        rec_ia = f"Error IA: {e}"
 
     # Traducir respuesta si es necesario
     if idioma != "es":
@@ -443,20 +416,10 @@ if st.session_state.get("analyzed"):
         "qué significa para su salud, y da consejos útiles para la vida diaria y cuándo consultar "
         "con un especialista. Máx 170 palabras."
     )
-    res_ext = requests.post(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent",
-        params={"key": GEMINI_KEY},
-        headers={"Content-Type":"application/json"},
-        json={"contents":[{"parts":[{"text":prompt_ext}]}]},
-        timeout=15
-    )
-    recomendacion_extensa = (
-        res_ext.json()
-            .get("candidates",[{}])[0]
-            .get("content",{})
-            .get("parts",[{}])[0]
-            .get("text", "Consulta siempre a un especialista si tienes dudas sobre tu salud.")
-    )
+    try:
+        recomendacion_extensa = get_long_recommendation(paciente, sano_p, park_p)
+    except GeminiError as e:
+        recomendacion_extensa = f"Consulta siempre a un especialista. (Detalle: {e})"
 
     # 2) Traducir la recomendación si el idioma no es español
     if idioma != "es":
