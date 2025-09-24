@@ -6,8 +6,7 @@ import wave
 from streamlit_mic_recorder import mic_recorder
 from fpdf import FPDF
 from datetime import datetime
-from googletrans import Translator
-translator = Translator()
+from deep_translator import GoogleTranslator
 import logging
 import os
 # backend
@@ -108,7 +107,8 @@ def traducir(texto: str, dest: str) -> str:
     try:
         # Aseguro que texto es str
         texto_str = str(texto)
-        return translator.translate(texto_str, dest=dest).text
+        # deep-translator devuelve directamente el texto traducido
+        return GoogleTranslator(source='auto', target=dest).translate(texto_str)
     except Exception:
         logging.exception("Error traduciendo texto")
         # En caso de fallo, devuelvo el texto original

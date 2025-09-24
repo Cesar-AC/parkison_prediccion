@@ -1,6 +1,5 @@
 # requirements.txt
 streamlit
-streamlit-webrtc
 soundfile
 numpy
 pandas
@@ -9,13 +8,10 @@ praat-parselmouth
 librosa
 nolds
 streamlit-mic-recorder
-tabulate
-opensmile
 scipy
-fpdf2 
+fpdf2
 requests
-ngrok
-pynegrok
-googletrans==4.0.0-rc1
+pyngrok
+deep-translator
 xgboost
 scikit-learn
