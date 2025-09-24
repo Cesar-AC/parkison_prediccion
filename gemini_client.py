@@ -16,15 +16,49 @@ from __future__ import annotations
 import os
 import requests
 from typing import Optional, Iterable
+from pathlib import Path
 
-# Claves gestionadas centralmente
+# Carga manual de .env (sin dependencia externa) si existe en el directorio del proyecto.
+# Se parsean líneas KEY=VALUE simples (sin comillas ni escapes avanzados).
+def _load_dotenv():
+    root = Path(__file__).resolve().parent
+    env_path = root / '.env'
+    if not env_path.exists():
+        return
+    try:
+        for line in env_path.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except Exception:
+        # Silencioso: si falla no debe romper la app
+        pass
+
+_load_dotenv()
+
+# Builders de prompts separados (para mantener este cliente limpio)
 try:
-    from .env_keys import PRIMARY_GEMINI_KEY, SECONDARY_GEMINI_KEY  # type: ignore
-except ImportError:  # fallback si import relativo falla
-    from env_keys import PRIMARY_GEMINI_KEY, SECONDARY_GEMINI_KEY  # type: ignore
+    from .gemini_prompts import (
+        build_feature_interpretations_prompt,
+        build_short_recommendation_prompt,
+        build_long_recommendation_prompt,
+    )  # type: ignore
+except ImportError:
+    from gemini_prompts import (
+        build_feature_interpretations_prompt,
+        build_short_recommendation_prompt,
+        build_long_recommendation_prompt,
+    )  # type: ignore
 
-# Conserva compatibilidad con código previo que esperaba GEMINI_KEY única
-GEMINI_KEY: str | None = os.getenv("GEMINI_KEY") or PRIMARY_GEMINI_KEY
+# Claves disponibles (failover). Se permiten 3 nombres por compatibilidad.
+GEMINI_KEY: str | None = os.getenv("GEMINI_KEY")  # retro-compatibilidad
+PRIMARY_ENV = os.getenv("PRIMARY_GEMINI_KEY")
+SECONDARY_ENV = os.getenv("SECONDARY_GEMINI_KEY")
 
 _API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
@@ -34,18 +68,19 @@ class GeminiError(RuntimeError):
 
 
 def _iter_keys() -> Iterable[str]:
-    """Devuelve las claves en orden de prioridad.
+        """Devuelve las claves en orden de prioridad.
 
-    Orden:
-      1. Variable de entorno GEMINI_KEY (si existe) para retro-compatibilidad.
-      2. PRIMARY_GEMINI_KEY
-      3. SECONDARY_GEMINI_KEY
-    """
-    seen = set()
-    for k in [os.getenv("GEMINI_KEY"), PRIMARY_GEMINI_KEY, SECONDARY_GEMINI_KEY]:
-        if k and k not in seen:
-            seen.add(k)
-            yield k
+        Orden:
+            1. GEMINI_KEY
+            2. PRIMARY_GEMINI_KEY
+            3. SECONDARY_GEMINI_KEY
+        Filtra duplicados y valores vacíos.
+        """
+        seen = set()
+        for k in [GEMINI_KEY, PRIMARY_ENV, SECONDARY_ENV]:
+                if k and k not in seen:
+                        seen.add(k)
+                        yield k
 
 
 def _post_prompt(prompt: str, timeout: int = 12) -> str:
@@ -88,34 +123,22 @@ def _post_prompt(prompt: str, timeout: int = 12) -> str:
 
 
 def get_feature_interpretations(detalles: str) -> str:
-    """Genera interpretaciones por variable (prompt fijo en español)."""
-    prompt = (
-        "Eres un experto en análisis de voz y Parkinson. "
-        "A continuación verás una lista de variables extraídas de la voz, con su descripción y su valor actual (clip). "
-        "Para cada variable, haz lo siguiente:\n"
-        "1. Explica en una sola frase y SIN REPETIR, qué mide esa variable (usa la descripción).\n"
-        "2. Da una pequeña recomendación, comentario o feedback positivo sobre la voz, usando sólo el valor actual (clip). "
-        "Habla directo al usuario, con lenguaje humano y cálido.\n\n"
-        f"Variables:\n{detalles}"
-    )
+    """Genera interpretaciones por variable.
+
+    'detalles' es el bloque multilinea que arma la vista/servicio con:
+        feature: descripcion | Valor actual (clip): X.YYY
+    """
+    prompt = build_feature_interpretations_prompt(detalles)
     return _post_prompt(prompt, timeout=15)
 
 
 def get_short_recommendation(paciente: str, sano_p: float, park_p: float) -> str:
-    prompt = (
-        f"Paciente: {paciente}. Probabilidades: Sano {sano_p:.1%}, Parkinson {park_p:.1%}. "
-        "Dame una recomendación breve y empática (máx 30 palabras)."
-    )
+    prompt = build_short_recommendation_prompt(paciente, sano_p, park_p)
     return _post_prompt(prompt, timeout=10)
 
 
 def get_long_recommendation(paciente: str, sano_p: float, park_p: float) -> str:
-    prompt = (
-        f"Eres un médico empático experto en Parkinson. Explica al paciente {paciente} "
-        f"el resultado de su análisis de voz (Sano: {sano_p:.1%}, Parkinson: {park_p:.1%}), "
-        "qué significa para su salud, y da consejos útiles para la vida diaria y cuándo consultar "
-        "con un especialista. Máx 170 palabras."
-    )
+    prompt = build_long_recommendation_prompt(paciente, sano_p, park_p)
     return _post_prompt(prompt, timeout=18)
 
 

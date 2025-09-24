@@ -10,3 +10,16 @@ venv/
 # Logs y datos binarios
 streamlit_logs.txt
 *.wav
+
+# Archivos de configuración sensibles
+.env
+.env.*
+env.local
+*.env.backup
+
+# Módulo con claves (se recomienda no versionarlo en producción)
+env_keys.py
+
+# Dumps o reportes con datos privados
+*.log
+*.dump

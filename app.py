@@ -13,6 +13,7 @@ from gemini_client import (
     get_long_recommendation,
     GeminiError,
 )
+from gemini_prompts import parse_feature_interpretations_response
 from deep_translator import GoogleTranslator
 import logging
 import os
@@ -30,7 +31,7 @@ FEATURE_DESCRIPTIONS = {
     "MDVP:Shimmer": "Variabilidad ciclo a ciclo en la intensidad de la voz."
 }
 
-# Clave movida a gemini_client.py (o variable de entorno GEMINI_KEY)
+# Las claves API ahora se cargan directamente desde .env dentro de gemini_client (sin env_keys.py)
 
 st.set_page_config(page_title="🎤 Parkinson Detector", layout="wide")
 st.markdown("""
@@ -270,17 +271,8 @@ if st.session_state.get("analyzed"):
     if idioma != "es":
         text_ia = traducir(text_ia, idioma)
 
-    # Parseo de líneas
-    lines = [l.strip() for l in text_ia.splitlines() if l.strip()]
-    if len(lines) == 1 and ";" in lines[0]:
-        lines = [seg.strip() for seg in lines[0].split(";") if seg.strip()]
-
-    parsed = {}
-    for ln in lines:
-        ln = ln.lstrip("-*• ").strip()
-        if ":" in ln:
-            var, desc = ln.split(":",1)
-            parsed[var.strip()] = desc.strip()
+    # Parseo estructurado usando módulo de prompts (elimina lógica duplicada)
+    parsed = parse_feature_interpretations_response(text_ia)
 
     # Construcción de final_interps (ya en el idioma seleccionado)
     final_interps = []
@@ -408,14 +400,7 @@ if st.session_state.get("analyzed"):
 
 
     # --- 4.5 Recomendación extensa (IA) para el PDF con traducción ---
-
-    # 1) Prompt en español para Gemini
-    prompt_ext = (
-        f"Eres un médico empático experto en Parkinson. Explica al paciente {paciente} "
-        f"el resultado de su análisis de voz (Sano: {sano_p:.1%}, Parkinson: {park_p:.1%}), "
-        "qué significa para su salud, y da consejos útiles para la vida diaria y cuándo consultar "
-        "con un especialista. Máx 170 palabras."
-    )
+    # El prompt ya se construye dentro de gemini_client (build_long_recommendation_prompt)
     try:
         recomendacion_extensa = get_long_recommendation(paciente, sano_p, park_p)
     except GeminiError as e:
