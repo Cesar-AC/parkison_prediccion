@@ -1,11 +1,17 @@
-# 🩺 Parkinson Detector – Voz como biomarcador temprano
+# 🩺 Parkinson Detector – Voz como biomarcador temprano
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/) 
 [![Streamlit Cloud](https://img.shields.io/badge/Streamlit-Cloud-success)](https://streamlit.io/cloud) 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) 
 [![Model: KNN](https://img.shields.io/badge/Model-KNN-blueviolet)](#cómo-funciona)
 
-**Parkinson Detector** es una aplicación web que analiza una grabación de voz de ≥ 5 segundos (vocal sostenida) y, mediante un modelo **SVM** entrenado sobre el *Oxford Parkinson’s Disease Detection Dataset*, estima la probabilidad de enfermedad de Parkinson. Además, incluye un módulo de **IA explicable (XAI)** que genera interpretaciones en lenguaje natural y un informe PDF descargable con todas las métricas. 
+**Parkinson Detector** es una aplicación web que analiza una grabación de voz (vocal sostenida ≥ 5 s) y estima la probabilidad de enfermedad de Parkinson usando pipelines de clasificación basados en **Voting / Stacking (SVC y otros modelos)** entrenados sobre el *Oxford Parkinson’s Disease Detection Dataset*. Incorpora:
+
+- Extracción acústica (Parselmouth + Librosa) de 3 indicadores clave optimizados para rapidez: `spread1`, `MDVP:APQ`, `MDVP:Shimmer`.
+- Interpretaciones automáticas en lenguaje natural generadas con **Gemini API**.
+- Traducción dinámica (multi‑idioma) vía **deep-translator**.
+- Informe **PDF clínico estilizado** con diagnóstico, tablas centradas, barra de probabilidades y recomendaciones.
+- Interfaz tipo **wizard** simplificada y barra visual de probabilidades en la vista de diagnóstico.
 
 
 <p align="center">
@@ -25,39 +31,29 @@
 
 ---
 
-## Cómo funciona
+## Arquitectura y flujo
 
-* **Parselmouth + Praat** para calcular 3 variables clave (**Spread1**, **MDVP:APQ**, **MDVP:Shimmer**).  
+1. **Extracción acústica** (`funcion.py`):
+  - Carga audio WAV, recorte de silencios, normalización segura.
+  - Parselmouth (Praat) para jitter/shimmer y procesamiento de f0 → cálculo de `spread1`, `MDVP:APQ`, `MDVP:Shimmer`.
+  - Clipping a rangos predefinidos para robustez frente a outliers.
+2. **Modelos** (`models/*.joblib`):
+  - Pipelines pre‑entrenados: Soft Voting y Stacking (incluyen escalado). Por defecto se usa la variante “soft”.
+3. **Inferencia**:
+  - Se generan probabilidades `[P(Parkinson), P(Sano)]` y se clasifica en tres estados: Saludable, Intermedio, Riesgo.
+4. **Interpretaciones IA** (`gemini_client.py` + `gemini_prompts.py`):
+  - Construcción de prompt con descripciones neuro‑acústicas.
+  - Llamadas a Gemini con failover de múltiples claves.
+  - Traducción posterior si el usuario selecciona idioma distinto de español.
+5. **PDF clínico** (`pdf_report.py`):
+  - Plantilla con encabezado, caja de paciente, tablas centradas, barra visual de probabilidades con porcentajes y bloque de recomendaciones extendidas.
+6. **UI Streamlit** (`app.py`):
+  - Wizard de 3 pasos (Datos, Grabación, Resultados).
+  - Grabación vía `streamlit-mic-recorder` (mínimo 5 s validado) y tarjetas de estado.
+  - Descarga de reporte propio + reportes multilingües estáticos.
 
-### 2. Modelo de clasificación
-* **Support Vector Machine (SVM)** con los mejores hiperparámetros:  
-  ```python
-  best_params = {'kernel': 'rbf', 'C': 100, 'gamma': 1}
-  svm_final = SVC(**best_params, probability=True, random_state=42)
-  svm_final.fit(X_train_s, y_train)
-  ```
-* Métricas de rendimiento (validación cruzada estratificada 10‑fold):  
-  | Métrica      | Train | Test  |
-  |--------------|-------|-------|
-  | **AUC‑ROC**  | 0.951 | 0.921 |
-  | **Accuracy** | 0.885 | 0.949 |
-  | **Precision**| 0.879 | 0.935 |
-  | **Recall**   | 0.983 | 1.000 |
-  | **F1**       | 0.928 | 0.967 |
-  | **MCC**      | 0.669 | 0.865 |
- 
-  * Repo oficial → <https://github.com/YannickJadoul/Parselmouth>  
-* Recorte de silencios, normalización y *clipping* a rangos aprendidos durante el entrenamiento.
-
-* Artefactos serializados en `svm_mcc_final`.
-
-### 3. IA explicable (XAI)
-* Importancia de variables por permutación + aproximación **SHAP** para KNN.  
-* Generación de explicaciones cortas mediante **Gemini API** [[Docs]](https://ai.google.dev/gemini-api/docs/text-generation) y creación de informe **PDF**.
-
-### 4. Front‑end
-* **Streamlit** con un *wizard* de tres pasos, grabación por [`streamlit‑mic‑recorder`](https://pypi.org/project/streamlit-mic-recorder/) y tarjetas de resultado.  
-* Diseño inspirado en ejemplos de la comunidad y repos médicos de referencia.
+### Diseño de probabilidades
+Se presenta barra segmentada (verde/naranja) con porcentaje superpuesto y, en el PDF, caja de diagnóstico independiente y explicación ampliada.
 
 ---
 
@@ -65,13 +61,20 @@
 
 ```text
 📦 Parkinson‑Detector
-├─ app.py                # interfaz Streamlit
-├─ funcion.py            # extracción de features + predicción
+├─ app.py                # interfaz Streamlit + flujo principal
+├─ funcion.py            # extracción de features + predicción (3 variables actuales)
+├─ gemini_client.py      # cliente HTTP Gemini + manejo de claves
+├─ gemini_prompts.py     # prompts y parser de interpretaciones
+├─ pdf_report.py         # generación de PDF estilizado
+├─ styles/theme.py       # inyección de CSS base
+├─ ui_components/wizard.py # componente visual wizard
 ├─ models/
-│  └─ svm_mcc_final.joblib
-├─ entrenamiento/        # notebooks y dataset
-│  ├─ Parkiston_Prediccion.ipynb
-│  └─ parkinsons.data
+│  ├─ soft_voting_parkinson.joblib
+│  ├─ stacking_parkinson.joblib
+│  └─ svm_mcc_final.joblib (referencia / histórico)
+├─ entrenamiento/        # notebook y dataset original
+│  ├─ Parkiston_Prediccion_Actualizado.ipynb
+│  └─ dataset/parkinsons.data
 ├─ requirements.txt
 ├─ tests/
 ├─ docs/                 # capturas y GIFs
@@ -96,27 +99,79 @@
 git clone https://github.com/Cesar-AC/parkison_prediccion.git
 cd parkison_prediccion
 python -m venv .venv
-source .venv/bin/activate      # En Windows: .venv\Scripts\activate
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
-El archivo requirements.txt instala streamlit, parselmouth, librosa, scikit‑learn, soundfile, fpdf, nolds, etc.
+Incluye: streamlit, praat-parselmouth, librosa, scikit-learn, soundfile, nolds, xgboost, fpdf2, deep-translator, etc.
 
-### 2 · Ejecución local
+### 2 · Variables de entorno (opcional/seguridad)
+Crea un archivo `.env` (no lo subas a Git) si quieres usar tus propias claves Gemini y token de ngrok:
+```
+GEMINI_KEY=xxxxxxxxxxxxxxxx
+PRIMARY_GEMINI_KEY=...
+SECONDARY_GEMINI_KEY=...
+NGROK_AUTH_TOKEN=xxxxxxxx
+```
+
+### 3 · Ejecución local
 ```bash
 streamlit run app.py
 ```
-La aplicación quedará disponible en http://localhost:8501; graba tu voz y visualiza el resultado en tiempo real.
+Abre http://localhost:8501 y sigue el wizard.
+
+### 4 · Uso de túnel (ngrok) – opcional
+```bash
+python ngrok.py
+```
+
+---
+
+## Generación de PDF
+El módulo `pdf_report.py` produce un informe clínico con:
+- Encabezado con fecha y título.
+- Caja de datos del paciente.
+- Tabla de variables centrada (valores Bruto/Clip + explicación).
+- Interpretaciones IA por variable.
+- Diagnóstico en caja + barra de probabilidades con porcentajes.
+- Recomendaciones ampliadas + texto educativo y disclaimer.
+
+Formato en latín‑1 para compatibilidad; se sanitiza texto para evitar caracteres no soportados.
+
+---
+
+## Traducciones
+Se usa `deep-translator` (GoogleTranslator). Política de fallback: ante error se retorna el texto original en español para no romper la UI.
+
+Idiomas actuales: Español (base), Inglés, Portugués, Francés, Chino simplificado.
+
+---
+
+## Buenas prácticas y seguridad
+- No subir `.env` ni tokens (Gemini / ngrok).
+- API Gemini: se implementa failover de múltiples claves.
+- Sanitización de strings en PDF y truncado defensivo de texto largo (> 5000 chars).
+- Validación mínima de duración de audio (≥ 4.5 s -> se exige 5 s al usuario).
+
+---
+
+## Roadmap breve
+- Añadir gráficos comparativos (barras) en el PDF.
+- Resumen semafórico (bajo/medio/alto) dentro del PDF.
+- Integración de cache para respuestas IA repetidas.
+- Tests unitarios mínimos para extracción de features.
+
+---
 
 ## Dataset
 Oxford Parkinson’s Disease Detection Dataset
 https://archive.ics.uci.edu/ml/datasets/Parkinsons
 
-Este conjunto de 195 grabaciones (23 pacientes, 8 controles) se emplea para entrenar el modelo **Support Vector Machine (SVM)** incluido en `models/svm_mcc_final.joblib`.
+195 registros (23 pacientes, 8 controles). Se usaron para entrenar varias configuraciones antes de consolidar pipelines Voting/Stacking presentes en `models/`.
 
 ## Licencia
-Este proyecto se distribuye bajo licencia MIT.
-Consulta el archivo LICENSE para más detalles.
-Badges generados con Shields.io.
+MIT. Consulta `LICENSE`. Badges: Shields.io.
 
 ## Fuentes consultadas
 
